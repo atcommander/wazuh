@@ -1,5 +1,5 @@
 ---
-wazuh_agent_version: 4.3.10
+wazuh_agent_version: 5.0.0
 
 # Custom packages installation
 
@@ -7,40 +7,17 @@ wazuh_custom_packages_installation_agent_enabled: false
 wazuh_custom_packages_installation_agent_deb_url: ""
 wazuh_custom_packages_installation_agent_rpm_url: ""
 
-# Sources installation
-
-wazuh_agent_sources_installation:
-  enabled: false
-  branch: "v4.3.10"
-  user_language: "y"
-  user_no_stop: "y"
-  user_install_type: "agent"
-  user_dir: "/var/ossec"
-  user_delete_dir: "y"
-  user_enable_active_response: "y"
-  user_enable_syscheck: "y"
-  user_enable_rootcheck: "y"
-  user_enable_openscap: "n"
-  user_enable_sca: "y"
-  user_enable_authd: "y"
-  user_generate_authd_cert: "n"
-  user_update: "y"
-  user_binaryinstall: null
-  user_agent_server_ip: "YOUR_MANAGER_IP"
-  user_agent_server_name: null
-  user_agent_config_profile: null
-  user_ca_store: "{{ wazuh_dir }}/wpk_root.pem"
-
 wazuh_agent_yum_lock_timeout: 30
 
 # We recommend the use of ansible-vault to protect Wazuh, api, agentless and authd credentials.
 api_pass: wazuh
 authd_pass: ""
 
-wazuh_api_reachable_from_agent: true
-wazuh_profile_centos: "centos, centos7, centos7.6"
-wazuh_profile_ubuntu: "ubuntu, ubuntu18, ubuntu18.04"
-wazuh_auto_restart: "yes"
+wazuh_api_reachable_from_agent: yes
+wazuh_profile_centos: 'centos, centos7, centos7.6'
+wazuh_profile_ubuntu: 'ubuntu, ubuntu18, ubuntu18.04'
+wazuh_profile_macos: 'darwin, darwin21, darwin21.1'
+wazuh_auto_restart: 'yes'
 
 wazuh_notify_time: "10"
 wazuh_time_reconnect: "60"
@@ -52,8 +29,12 @@ wazuh_winagent_config:
   auth_path: C:\Program Files\ossec-agent\agent-auth.exe
   # Adding quotes to auth_path_x86 since win_shell outputs error otherwise
   auth_path_x86: C:\'Program Files (x86)'\ossec-agent\agent-auth.exe
-  check_md5: true
-  md5: eee54087d25a42ceb27ecf8ad562143f
+  check_sha512: True
+
+# macOS deployment
+wazuh_macos_config:
+  download_dir: /tmp/
+  install_dir: /Library/Ossec/
 
 wazuh_dir: "/var/ossec"
 
@@ -87,7 +68,7 @@ wazuh_managers:
     retry_interval: 5
     register: true
 
-## Authentication Method: Enrollment section (4.x)
+## Authentication Method: Enrollment section (5.x)
 
 # For more information see:
 # * https://documentation.wazuh.com/current/user-manual/reference/ossec-conf/client.html#enrollment
@@ -104,7 +85,8 @@ wazuh_agent_enrollment:
   agent_certificate_path: ""
   agent_key_path: ""
   authorization_pass_path: "{{ wazuh_dir }}/etc/authd.pass"
-  auto_method: "no"
+  authorization_pass_path_macos: "/etc/authd.pass"
+  auto_method: 'no'
   delay_after_enrollment: 20
   use_source_ip: "no"
 
@@ -230,7 +212,12 @@ wazuh_agent_syscheck:
     - dirs: /etc,/usr/bin,/usr/sbin
       checks: ""
     - dirs: /bin,/sbin,/boot
-      checks: ""
+      checks: ''
+  macos_directories:
+    - dirs: /etc,/usr/bin,/usr/sbin
+      checks: ''
+    - dirs: /bin,/sbin
+      checks: ''
   win_directories:
     - dirs: "%WINDIR%"
       checks: 'check_all="yes" whodata="yes" recursion_level="0" restrict="regedit.exe$|system.ini$|win.ini$"'
@@ -328,13 +315,22 @@ wazuh_agent_localfiles:
       frequency: "360"
     - format: "command"
       command: df -P
-      frequency: "360"
-    - format: "full_command"
-      command: >
-        netstat -tulpn | sed 's/\([[:alnum:]]\+\)\ \+[[:digit:]]\+\ \+[[:digit:]]\+\ \+\(.*\):\([[:digit:]]*\)\ \+\([0-9\.\:\*]\+\).\+\
-        \([[:digit:]]*\/[[:alnum:]\-]*\).*/\1 \2 == \3 == \4 \5/' | sort -k 4 -g | sed 's/ == \(.*\) ==/:\1/' | sed 1,2d
-      alias: "netstat listening ports"
-      frequency: "360"
+      frequency: '360'
+    - format: 'full_command'
+      command: netstat -tulpn | sed 's/\([[:alnum:]]\+\)\ \+[[:digit:]]\+\ \+[[:digit:]]\+\ \+\(.*\):\([[:digit:]]*\)\ \+\([0-9\.\:\*]\+\).\+\ \([[:digit:]]*\/[[:alnum:]\-]*\).*/\1 \2 == \3 == \4 \5/' | sort -k 4 -g | sed 's/ == \(.*\) ==/:\1/' | sed 1,2d
+      alias: 'netstat listening ports'
+      frequency: '360'
+  macos:
+    - format: 'full_command'
+      command: netstat -an | awk '{if ((/^(tcp|udp)/) && ($4 != "*.*") && ($5 == "*.*")) {print $1" "$4" "$5}}' | sort -u
+      alias: 'netstat listening ports'
+      frequency: '360'
+    - format: 'macos'
+      location: 'macos'
+      query:
+        type: 'trace,log,activity'
+        level: 'info'
+        value: (process == "sudo") or (process == "sessionlogoutd" and message contains "logout is complete.") or (process == "sshd") or (process == "tccd" and message contains "Update Access Record") or (message contains "SessionAgentNotificationCenter") or (process == "screensharingd" and message contains "Authentication") or (process == "securityd" and eventMessage contains "Session" and subsystem == "com.apple.securityd")
   windows:
     - format: "eventlog"
       location: "Application"
@@ -359,8 +355,9 @@ wazuh_agent_labels:
 wazuh_agent_active_response:
   ar_disabled: "no"
   ca_store: "{{ wazuh_dir }}/etc/wpk_root.pem"
-  ca_store_win: "wpk_root.pem"
-  ca_verification: "yes"
+  ca_store_win: 'wpk_root.pem'
+  ca_store_macos: 'etc/wpk_root.pem'
+  ca_verification: 'yes'
 
 ## Logging
 wazuh_agent_log_format: "plain"

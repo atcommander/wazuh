@@ -1,12 +1,37 @@
 ---
 - name: "Install dependencies"
-  package:
-    name:
-      - unzip
-      - openssl
-      - tar
-      - curl
-    state: present
+  block:
+    - name: "Install common dependencies"
+      package:
+        name:
+          - unzip
+          - openssl
+          - tar
+        state: present
+      register: package_status
+      until: "package_status is not failed"  
+      retries: 10
+      delay: 10
+
+    - name: "Install curl"
+      package:
+        name: curl
+        state: present
+      when: ansible_distribution != "Amazon" and ansible_distribution_version != "2023"
+      register: package_status
+      until: "package_status is not failed"  
+      retries: 10
+      delay: 10
+
+    - name: "Install curl minimal in AL2023"
+      package:
+        name: curl-minimal
+        state: present
+      when: ansible_distribution == "Amazon" and ansible_distribution_version == "2023"
+      register: package_status
+      until: "package_status is not failed"  
+      retries: 10
+      delay: 10
 
 - include_vars: repo_vars.yml
 
@@ -34,6 +59,22 @@
   include_tasks: "Debian.yml"
   when: ansible_os_family == "Debian"
 
+- name: Generate the wazuh-keystore (username)
+  shell: >
+    /var/ossec/bin/wazuh-keystore -f indexer -k username -v {{ indexer_security_user }}
+  notify: restart wazuh-manager
+  tags:
+    - init
+    - config
+
+- name: Generate the wazuh-keystore (password)
+  shell: >
+    /var/ossec/bin/wazuh-keystore -f indexer -k password -v {{ indexer_security_password }}
+  notify: restart wazuh-manager
+  tags:
+    - init
+    - config
+  
 - name: Install expect
   package:
     name: expect
@@ -116,12 +157,11 @@
     - config
 
 - name: Installing the local_rules.xml (default local_rules.xml)
-  template:
-    src: var-ossec-rules-local_rules.xml.j2
-    dest: "{{ wazuh_dir }}/etc/rules/local_rules.xml"
-    owner: wazuh
-    group: wazuh
-    mode: 0640
+  template: src=var-ossec-rules-local_rules.xml.j2
+            dest="{{ wazuh_dir }}/etc/rules/local_rules.xml"
+            owner=wazuh
+            group=wazuh
+            mode=0660
   notify: restart wazuh-manager
   tags:
     - init
@@ -129,12 +169,11 @@
     - rules
 
 - name: Adding local rules files
-  copy:
-    src: "{{ wazuh_manager_config.ruleset.rules_path }}"
-    dest: "{{ wazuh_dir }}/etc/rules/"
-    owner: wazuh
-    group: wazuh
-    mode: 0640
+  copy: src="{{ wazuh_manager_config.ruleset.rules_path }}"
+        dest="{{ wazuh_dir }}/etc/rules/"
+        owner=wazuh
+        group=wazuh
+        mode=0660
   notify: restart wazuh-manager
   tags:
     - init
@@ -142,12 +181,11 @@
     - rules
 
 - name: Installing the local_decoder.xml
-  template:
-    src: var-ossec-rules-local_decoder.xml.j2
-    dest: "{{ wazuh_dir }}/etc/decoders/local_decoder.xml"
-    owner: wazuh
-    group: wazuh
-    mode: 0640
+  template: src=var-ossec-rules-local_decoder.xml.j2
+            dest="{{ wazuh_dir }}/etc/decoders/local_decoder.xml"
+            owner=wazuh
+            group=wazuh
+            mode=0660
   notify: restart wazuh-manager
   tags:
     - init
@@ -155,12 +193,11 @@
     - rules
 
 - name: Adding local decoders files
-  copy:
-    src: "{{ wazuh_manager_config.ruleset.decoders_path }}"
-    dest: "{{ wazuh_dir }}/etc/decoders/"
-    owner: wazuh
-    group: wazuh
-    mode: 0640
+  copy: src="{{ wazuh_manager_config.ruleset.decoders_path }}"
+        dest="{{ wazuh_dir }}/etc/decoders/"
+        owner=wazuh
+        group=wazuh
+        mode=0660
   notify: restart wazuh-manager
   tags:
     - init
@@ -173,7 +210,7 @@
     dest: "{{ wazuh_dir }}/etc/shared/default/agent.conf"
     owner: wazuh
     group: wazuh
-    mode: 0640
+    mode: 0660
     validate: "{{ wazuh_dir }}/bin/verify-agent-conf -f %s"
   notify: restart wazuh-manager
   tags:
@@ -319,6 +356,11 @@
       with_items:
         - "{{ wazuh_api_users }}"
 
+    - name: Delete create_user script
+      file:
+        path: "{{ wazuh_dir }}/framework/scripts/create_user.py"
+        state: absent
+
   tags:
     - config_api_users
   when:
@@ -361,4 +403,3 @@
 
 - name: Run uninstall tasks
   include_tasks: uninstall.yml
-  when: not wazuh_manager_sources_installation.enabled

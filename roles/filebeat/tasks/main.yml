@@ -1,4 +1,12 @@
 ---
+- include_vars: ../../vars/repo_vars.yml
+
+- include_vars: ../../vars/repo.yml
+  when: packages_repository == 'production'
+
+- include_vars: ../../vars/repo_pre-release.yml
+  when: packages_repository == 'pre-release'
+
 - include_tasks: RedHat.yml
   when: ansible_os_family == 'RedHat'
 
@@ -21,8 +29,11 @@
     state: present
   register: install
   tags:
-    - install
-    - init
+  - install
+  - init
+  until: "install is not failed"  
+  retries: 10
+  delay: 10
   when: ansible_os_family == 'Debian'
 
 - name: Checking if Filebeat Module folder file exists
